@@ -1,6 +1,8 @@
 {
   "rewrites": [
     { "source": "/admin", "destination": "/admin.html" },
+    { "source": "/QR-Landing-page", "destination": "/QR-Landing-page/index.html" },
+    { "source": "/QR-Landing-page/", "destination": "/QR-Landing-page/index.html" },
     { "source": "/((?!assets/|admin.html|.*\\..*).*)", "destination": "/index.html" }
   ]
 }

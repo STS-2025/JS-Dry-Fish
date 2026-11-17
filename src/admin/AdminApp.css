@@ -852,6 +852,23 @@ select::placeholder {
   white-space: nowrap;
 }
 
+.qr-price-row-actions button:disabled { cursor: not-allowed; opacity: .45; }
+.qr-price-editor-modal { width: min(540px, 100%); }
+.qr-price-editor-modal .admin-product-modal-header h2 { margin: 4px 0 0; color: #17364b; font-size: 18px; }
+.qr-price-editor-modal .admin-product-modal-header p { margin: 4px 0 0; color: #718696; font-size: 12px; }
+.qr-price-editor-note { margin: -5px 0 14px; color: #718696; font-size: 12px; }
+.qr-price-editor-modal .qr-price-auto-setting { display: flex; align-items: flex-start; gap: 9px; margin: 2px 0 15px; cursor: pointer; }
+.qr-price-editor-modal .qr-price-auto-setting input[type="checkbox"] { width: 16px; height: 16px; flex: 0 0 16px; margin: 1px 0 0; padding: 0; border: 1px solid #8baabd; border-radius: 4px; background: #fff; accent-color: #168acb; }
+.qr-price-auto-setting span { display: grid; gap: 3px; }
+.qr-price-auto-setting strong { color: #24485f; font-size: 12px; }
+.qr-price-auto-setting small { color: #718696; font-size: 11px; font-weight: 400; line-height: 1.45; }
+.qr-price-edit-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.qr-price-edit-grid label { display: grid; gap: 6px; color: #38586c; font-size: 12px; font-weight: 700; }
+.qr-price-edit-input { display: flex; min-height: 40px; align-items: center; gap: 7px; border: 1px solid #dceaf3; border-radius: 9px; padding: 0 11px; background: #fbfdfe; color: #668093; }
+.qr-price-edit-input:focus-within { border-color: #168acb; box-shadow: 0 0 0 2px rgba(22, 138, 203, .1); }
+.qr-price-edit-input input { width: 100%; min-width: 0; border: 0; outline: 0; background: transparent; color: #17364b; font: inherit; font-size: 13px; }
+.qr-price-edit-input input:disabled { color: #718696; opacity: .8; }
+
 .admin-stock {
   color: #27866d;
   font-weight: 800;
@@ -1777,6 +1794,19 @@ select::placeholder {
   border-color: #7dc5e7;
   box-shadow: 0 0 0 3px rgba(22, 138, 203, 0.1);
   background: #fff;
+}
+
+.admin-product-modal-container .qr-price-edit-input input {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.admin-product-modal-container .qr-price-edit-input input:focus {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 /* ==========================================================================

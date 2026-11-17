@@ -4,6 +4,7 @@ import { couponsData } from './data/products';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+const QR_PRODUCT_PRICES_SETTING_KEY = 'qr_product_prices';
 
 export const isSupabaseConfigured = () => {
   return Boolean(
@@ -796,13 +797,38 @@ export async function fetchAdminSettings() {
     if (error) throw error;
     const settings = {};
     (data || []).forEach(row => {
-      settings[row.key] = row.value;
+      if (row.key !== QR_PRODUCT_PRICES_SETTING_KEY) settings[row.key] = row.value;
     });
     return Object.keys(settings).length > 0 ? settings : null;
   } catch (err) {
     console.warn('Unable to load store settings from Supabase:', err.message);
     return null;
   }
+}
+
+export async function fetchQrProductPrices() {
+  if (!supabase) throw new Error('Supabase is not configured.');
+  const { data, error } = await supabase
+    .from('store_settings')
+    .select('value')
+    .eq('key', QR_PRODUCT_PRICES_SETTING_KEY)
+    .maybeSingle();
+  if (error) throw new Error(`Unable to load QR product prices: ${error.message}`);
+  if (!data?.value) return {};
+  try {
+    const prices = JSON.parse(data.value);
+    return prices && typeof prices === 'object' && !Array.isArray(prices) ? prices : {};
+  } catch (_) {
+    return {};
+  }
+}
+
+export async function saveQrProductPrices(prices) {
+  if (!supabase) throw new Error('Supabase is not configured.');
+  const { error } = await supabase
+    .from('store_settings')
+    .upsert({ key: QR_PRODUCT_PRICES_SETTING_KEY, value: JSON.stringify(prices) }, { onConflict: 'key' });
+  if (error) throw new Error(`Unable to save QR product prices: ${error.message}`);
 }
 
 /**

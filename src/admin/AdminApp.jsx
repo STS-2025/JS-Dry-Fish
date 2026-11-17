@@ -5,6 +5,8 @@ import {
   fetchAllOrders,
   fetchAdminCustomers,
   fetchAdminProducts,
+  fetchQrProductPrices,
+  saveQrProductPrices,
   saveAdminProduct as saveSupabaseProduct,
   setAdminProductActive,
   updateOrderStatus as updateSupabaseOrderStatus,
@@ -34,11 +36,46 @@ import PasswordInput from '../components/common/PasswordInput';
 import AppIcon from '../components/common/AppIcon';
 import './AdminApp.css';
 
+const qrWeightSizes = { '200g': 200, '250g': 250, '500g': 500, '1kg': 1000 };
+
+function getQrWeightGrams(weight) {
+  if (qrWeightSizes[weight]) return qrWeightSizes[weight];
+  const match = String(weight || '').trim().toLowerCase().match(/^(\d+(?:\.\d+)?)\s*(kg|g)$/);
+  if (!match) return 500;
+  return Number(match[1]) * (match[2] === 'kg' ? 1000 : 1);
+}
+
+function getQrProductPacks(product) {
+  return Array.isArray(product.availablePacks) && product.availablePacks.length
+    ? product.availablePacks
+    : product.category === 'pickle' ? ['200g', '500g'] : ['250g', '500g', '1kg'];
+}
+
+function getQrDefaultPrice(product, weight) {
+  if (product.packPrices?.[weight] != null) return Number(product.packPrices[weight]);
+  if (product.packSize) {
+    return Math.round(Number(product.packPrice || product.basePrice250g || 0) *
+      (qrWeightSizes[weight] || 250) / (qrWeightSizes[product.packSize] || 250));
+  }
+  const multiplier = weight === '500g' ? 1.9 : weight === '1kg' ? 3.6 : 1;
+  return Math.round(Number(product.basePrice250g || 0) * multiplier);
+}
+
+function getQrPriceFrom500g(price, weight) {
+  return Math.round(Number(price || 0) * getQrWeightGrams(weight) / qrWeightSizes['500g']);
+}
+
 function AdminDashboard({ token, onLogout }) {
   const [tab, setTab] = useState('Overview');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [overview, setOverview] = useState(null);
   const [products, setProducts] = useState(productsData);
+  const [qrProductPrices, setQrProductPrices] = useState({});
+  const [qrPriceEditor, setQrPriceEditor] = useState(null);
+  const [qrPriceSearch, setQrPriceSearch] = useState('');
+  const [qrPriceCategoryFilter, setQrPriceCategoryFilter] = useState('All');
+  const [qrPricePage, setQrPricePage] = useState(1);
+  const [showArchivedQrProducts, setShowArchivedQrProducts] = useState(false);
   const [orders, setOrders] = useState([]);
   const [customers, setCustomers] = useState([]);
   const [customerSearch, setCustomerSearch] = useState('');
@@ -1004,6 +1041,13 @@ function AdminDashboard({ token, onLogout }) {
           setError(getAdminErrorMessage(pErr));
         }
 
+        try {
+          setQrProductPrices(await fetchQrProductPrices());
+        } catch (qrPriceError) {
+          console.warn('Could not load QR product prices:', qrPriceError);
+          setError(getAdminErrorMessage(qrPriceError));
+        }
+
         let currentCoupons = coupons;
         try {
           const liveCoupons = await fetchAdminCoupons();
@@ -1116,6 +1160,27 @@ function AdminDashboard({ token, onLogout }) {
       return matchesArchive && matchesCategory && matchesQuery;
     });
   }, [products, search, showArchived, productCategoryFilter]);
+
+  const filteredQrProducts = useMemo(() => {
+    const query = qrPriceSearch.trim().toLowerCase();
+    return products.filter(product => {
+      const matchesArchive = showArchivedQrProducts || product.isActive !== false;
+      const matchesCategory = qrPriceCategoryFilter === 'All' ||
+        String(product.category || '').toLowerCase() === qrPriceCategoryFilter.toLowerCase();
+      const matchesQuery = !query || [product.code, product.nameEn, product.nameTa, product.category]
+        .some(value => String(value || '').toLowerCase().includes(query));
+      return matchesArchive && matchesCategory && matchesQuery;
+    });
+  }, [products, qrPriceSearch, showArchivedQrProducts, qrPriceCategoryFilter]);
+
+  const qrPricePageCount = Math.max(1, Math.ceil(filteredQrProducts.length / PRODUCTS_PER_PAGE));
+  const currentQrPricePage = Math.min(qrPricePage, qrPricePageCount);
+  const paginatedQrProducts = filteredQrProducts.slice(
+    (currentQrPricePage - 1) * PRODUCTS_PER_PAGE,
+    currentQrPricePage * PRODUCTS_PER_PAGE
+  );
+  const firstQrProduct = filteredQrProducts.length ? (currentQrPricePage - 1) * PRODUCTS_PER_PAGE + 1 : 0;
+  const lastQrProduct = Math.min(currentQrPricePage * PRODUCTS_PER_PAGE, filteredQrProducts.length);
 
   const orderCounts = useMemo(() => {
     const counts = { All: orders.length, Pending: 0, Confirmed: 0, Packed: 0, Shipped: 0, Delivered: 0, Cancelled: 0 };
@@ -1467,6 +1532,51 @@ function AdminDashboard({ token, onLogout }) {
     }
   };
 
+  const openQrPriceEditor = product => {
+    const basePrice = qrProductPrices[product.code]?.['500g'] ?? getQrDefaultPrice(product, '500g');
+    const weights = Object.fromEntries(Array.from(new Set(['500g', ...getQrProductPacks(product)])).map(weight => [
+      weight,
+      weight === '500g' ? basePrice : getQrPriceFrom500g(basePrice, weight)
+    ]));
+    setQrPriceEditor({ product, weights, use500gPrice: true });
+  };
+
+  const saveQrPriceEditor = async event => {
+    event.preventDefault();
+    if (!qrPriceEditor) return;
+    setBusy(true);
+    try {
+      const productCode = qrPriceEditor.product.code;
+      const pricesForProduct = Object.fromEntries(Object.entries(qrPriceEditor.weights)
+        .filter(([, value]) => value !== '' && value != null && Number.isFinite(Number(value)) && Number(value) >= 0)
+        .map(([weight, value]) => [weight, Number(value)]));
+      const nextPrices = { ...qrProductPrices, [productCode]: pricesForProduct };
+      await saveQrProductPrices(nextPrices);
+      setQrProductPrices(nextPrices);
+      setQrPriceEditor(null);
+      showNotice(`Antony prices updated for ${qrPriceEditor.product.nameEn}.`);
+    } catch (saveError) {
+      setError(getAdminErrorMessage(saveError));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const resetQrProductPrices = async product => {
+    const nextPrices = { ...qrProductPrices };
+    delete nextPrices[product.code];
+    setBusy(true);
+    try {
+      await saveQrProductPrices(nextPrices);
+      setQrProductPrices(nextPrices);
+      showNotice(`Antony prices reset to storefront rates for ${product.nameEn}.`);
+    } catch (resetError) {
+      setError(getAdminErrorMessage(resetError));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const changePassword = async event => {
     event.preventDefault();
     setError('');
@@ -1512,6 +1622,7 @@ function AdminDashboard({ token, onLogout }) {
   const navigation = [
     'Overview',
     'Products & stock',
+    'Antony price list',
     'Orders',
     'Wholesale requests',
     'Customers',
@@ -2125,6 +2236,98 @@ function AdminDashboard({ token, onLogout }) {
                   <button type="button" onClick={() => setProductPage(currentProductPage - 1)} disabled={currentProductPage === 1}>Previous</button>
                   <span>Page {currentProductPage} of {productPageCount}</span>
                   <button type="button" onClick={() => setProductPage(currentProductPage + 1)} disabled={currentProductPage === productPageCount}>Next</button>
+                </div>
+              </div>
+            </div>
+          </section>
+        )}
+
+        {tab === 'Antony price list' && (
+          <section className="admin-content">
+            <div className="admin-toolbar">
+              <div>
+                <span className="admin-eyebrow">ANTONY PRICE LIST</span>
+              </div>
+              <button
+                className="admin-secondary-button"
+                aria-pressed={showArchivedQrProducts}
+                onClick={() => { setShowArchivedQrProducts(value => !value); setQrPricePage(1); }}
+              >
+                {showArchivedQrProducts ? 'Hide archived' : `Show archived (${products.filter(product => product.isActive === false).length})`}
+              </button>
+            </div>
+
+            <div className="admin-category-filter-bar">
+              <span style={{ fontSize: '11px', fontWeight: 800, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                Filter Category:
+              </span>
+              <div className="admin-category-pills-list">
+                {productCategories.map(category => (
+                  <button
+                    key={category}
+                    type="button"
+                    className={`admin-category-pill-btn ${qrPriceCategoryFilter.toLowerCase() === category.toLowerCase() ? 'active' : ''}`}
+                    onClick={() => { setQrPriceCategoryFilter(category); setQrPricePage(1); }}
+                  >{category}</button>
+                ))}
+              </div>
+            </div>
+
+            <div className="admin-panel">
+              <div className="admin-table-tools">
+                <input
+                  value={qrPriceSearch}
+                  onChange={event => { setQrPriceSearch(event.target.value); setQrPricePage(1); }}
+                  placeholder="Search by product name, Tamil name, or code..."
+                />
+                <span>{filteredQrProducts.filter(product => product.isActive !== false).length} active products</span>
+              </div>
+              <div className="admin-table-scroll">
+                <table className="admin-table">
+                  <thead>
+                    <tr>
+                      <th>Product</th>
+                      <th>Code / Category</th>
+                      <th>Price</th>
+                      <th>Stock Status</th>
+                      <th>Status</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {paginatedQrProducts.map(product => {
+                      const stockVal = product.stock;
+                      const isLowStock = stockVal != null && stockVal <= Number(settings.lowStockThreshold || 10);
+                      const isOutOfStock = stockVal != null && stockVal === 0;
+                      const hasQrPrices = Boolean(qrProductPrices[product.code] && Object.keys(qrProductPrices[product.code]).length);
+                      return (
+                        <tr key={product.id || product.code}>
+                          <td><div className="admin-product-cell"><div><strong>{product.nameEn}</strong><small style={{ color: '#64748b' }}>{product.nameTa}</small></div></div></td>
+                          <td><strong>{product.code}</strong><small className="admin-cell-subtitle">{product.category}</small></td>
+                          <td><strong>{formatCurrency(qrProductPrices[product.code]?.['500g'] ?? getQrDefaultPrice(product, '500g'))}</strong><small className="admin-cell-subtitle">per 500g</small></td>
+                          <td><span className={`admin-stock-badge ${isOutOfStock ? 'critical' : isLowStock ? 'low' : 'good'}`}>
+                            {isOutOfStock ? 'Out of Stock' : isLowStock ? `Low (${stockVal} left)` : stockVal == null ? 'Untracked' : `In Stock (${stockVal})`}
+                          </span></td>
+                          <td><span className={`admin-status-pill ${product.isActive !== false ? 'active' : 'inactive'}`}>
+                            {product.isActive !== false ? 'Active' : 'Archived'}
+                          </span></td>
+                          <td><div className="admin-row-actions qr-price-row-actions">
+                            <button type="button" onClick={() => openQrPriceEditor(product)}>Edit</button>
+                            <button type="button" className="danger" disabled={!hasQrPrices || busy} onClick={() => resetQrProductPrices(product)}>Reset</button>
+                          </div></td>
+                        </tr>
+                      );
+                    })}
+                    {!filteredQrProducts.length && <tr><td className="admin-empty" colSpan="6">No matching products found.</td></tr>}
+                  </tbody>
+                </table>
+              </div>
+              <div className="admin-pagination">
+                <span>Showing {firstQrProduct}–{lastQrProduct} of {filteredQrProducts.length} products</span>
+                <div className="admin-pagination-actions">
+                  <button type="button" onClick={() => setQrPricePage(currentQrPricePage - 1)} disabled={currentQrPricePage === 1}>Previous</button>
+                  <span>Page {currentQrPricePage} of {qrPricePageCount}</span>
+                  <button type="button" onClick={() => setQrPricePage(currentQrPricePage + 1)} disabled={currentQrPricePage === qrPricePageCount}>Next</button>
                 </div>
               </div>
             </div>
@@ -3534,6 +3737,83 @@ function AdminDashboard({ token, onLogout }) {
         )}
       </main>
       {editor && <ProductEditor product={editor} onClose={() => setEditor(undefined)} onSave={saveProduct} existingProducts={products} />}
+
+      {qrPriceEditor && (
+        <div className="admin-modal-backdrop" onMouseDown={event => event.target === event.currentTarget && !busy && setQrPriceEditor(null)}>
+          <form className="admin-product-modal-container qr-price-editor-modal" onSubmit={saveQrPriceEditor} role="dialog" aria-modal="true" aria-labelledby="qr-price-editor-title">
+            <div className="admin-product-modal-header">
+              <div>
+                <span className="admin-eyebrow">ANTONY PRICE LIST</span>
+                <h2 id="qr-price-editor-title">Edit Antony prices</h2>
+                <p>{qrPriceEditor.product.nameEn}</p>
+              </div>
+              <button type="button" className="admin-icon-button" onClick={() => setQrPriceEditor(null)} disabled={busy} aria-label="Close price editor">×</button>
+            </div>
+            <div className="admin-product-modal-body">
+              <section className="admin-form-section-card">
+                <div className="admin-section-header">
+                  <strong className="admin-section-title">Price by weight</strong>
+                </div>
+                <label className="qr-price-auto-setting">
+                  <input
+                    type="checkbox"
+                    checked={qrPriceEditor.use500gPrice}
+                    onChange={event => {
+                      const use500gPrice = event.target.checked;
+                      setQrPriceEditor(current => {
+                        if (!use500gPrice) return { ...current, use500gPrice };
+                        const basePrice = current.weights['500g'];
+                        const weights = Object.fromEntries(Object.keys(current.weights).map(weight => [
+                          weight,
+                          weight === '500g' ? basePrice : getQrPriceFrom500g(basePrice, weight)
+                        ]));
+                        return { ...current, use500gPrice, weights };
+                      });
+                    }}
+                  />
+                  <span><strong>Calculate other weights from the 500g price</strong><small>Enabled by default. Other pack prices are calculated proportionally.</small></span>
+                </label>
+                <p className="qr-price-editor-note">These values update this product on the Antony price list only.</p>
+                <div className="qr-price-edit-grid">
+                  {Object.entries(qrPriceEditor.weights).map(([weight, value]) => (
+                    <label key={weight}>
+                      <span>{weight}</span>
+                      <span className="qr-price-edit-input"><span>₹</span><input
+                        type="number"
+                        min="0"
+                        step="1"
+                        required
+                        value={value}
+                        disabled={weight !== '500g' && qrPriceEditor.use500gPrice}
+                        onFocus={event => event.target.select()}
+                        onChange={event => {
+                          const nextValue = event.target.value;
+                          setQrPriceEditor(current => ({
+                            ...current,
+                            weights: {
+                              ...current.weights,
+                              [weight]: nextValue,
+                              ...(weight === '500g' && current.use500gPrice && nextValue !== ''
+                                ? Object.fromEntries(Object.keys(current.weights)
+                                  .filter(pack => pack !== '500g')
+                                  .map(pack => [pack, getQrPriceFrom500g(nextValue, pack)]))
+                                : {})
+                            }
+                          }));
+                        }}
+                      /></span>
+                    </label>
+                  ))}
+                </div>
+              </section>
+            </div>
+            <div className="admin-product-modal-footer">
+              <button type="button" className="admin-secondary-button" onClick={() => setQrPriceEditor(null)} disabled={busy}>Cancel</button>
+              <button type="submit" className="admin-primary-button" disabled={busy}>{busy ? 'Saving…' : 'Save Antony prices'}</button>
+            </div>
+          </form>
+        </div>
+      )}
 
       {/* Modal for Wholesale Request Full Details */}
       {selectedWholesaleDetail && (

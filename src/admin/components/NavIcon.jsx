@@ -19,6 +19,13 @@ export default function NavIcon({ name }) {
           <line x1="12" y1="22.08" x2="12" y2="12" />
         </svg>
       );
+    case 'Antony price list':
+      return (
+        <svg className="admin-nav-svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3z" />
+          <path d="M14 14h3v3h-3zM19 14v2M21 18v3M17 21h-3" />
+        </svg>
+      );
     case 'Orders':
       return (
         <svg className="admin-nav-svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">

@@ -28,7 +28,8 @@ export default defineConfig({
     rollupOptions: {
       input: {
         store: resolve(appDir, 'index.html'),
-        admin: resolve(appDir, 'admin.html')
+        admin: resolve(appDir, 'admin.html'),
+        qrLanding: resolve(appDir, 'QR-Landing-page/index.html')
       }
     }
   }
